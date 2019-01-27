@@ -26,12 +26,17 @@ typedef struct {
 	KeySym keysym;
 	void (*func)(const Arg *);
 	const Arg arg;
+	/* three-valued logic variables: 0 indifferent, 1 on, -1 off */
+	signed char altscreen;
 } Shortcut;
 
 typedef struct {
-	uint b;
 	uint mask;
-	char *s;
+	uint b;
+	void (*func)(const Arg *);
+	const Arg arg;
+	/* three-valued logic variables: 0 indifferent, 1 on, -1 off */
+	signed char altscreen;
 } MouseShortcut;
 
 typedef struct {
@@ -42,6 +47,12 @@ typedef struct {
 	signed char appkey;    /* application keypad */
 	signed char appcursor; /* application cursor */
 } Key;
+
+typedef struct {
+	uint b;
+	uint mask;
+	char *s;
+} MouseKey;
 
 /* X modifiers */
 #define XK_ANY_MOD    UINT_MAX
@@ -409,6 +420,7 @@ bpress(XEvent *e)
 {
 	struct timespec now;
 	MouseShortcut *ms;
+	MouseKey *mk;
 	int snap;
 
 	if (IS_SET(WMODE_MOUSE) && !(e->xbutton.state & forceselmod)) {
@@ -419,7 +431,19 @@ bpress(XEvent *e)
 	for (ms = mshortcuts; ms < mshortcuts + LEN(mshortcuts); ms++) {
 		if (e->xbutton.button == ms->b
 				&& match(ms->mask, e->xbutton.state)) {
-			ttywrite(ms->s, strlen(ms->s), 1);
+			if (IS_SET(WMODE_ALTSCREEN) ?
+			    ms->altscreen < 0 :
+			    ms->altscreen > 0)
+				continue;
+			ms->func(&(ms->arg));
+			return;
+		}
+        }
+
+	for (mk = mkeys; mk < mkeys + LEN(mkeys); mk++) {
+		if (e->xbutton.button == mk->b
+				&& match(mk->mask, e->xbutton.state)) {
+			ttywrite(mk->s, strlen(mk->s), 1);
 			return;
 		}
 	}
@@ -1702,6 +1726,10 @@ kpress(XEvent *ev)
 	/* 1. shortcuts */
 	for (bp = shortcuts; bp < shortcuts + LEN(shortcuts); bp++) {
 		if (ksym == bp->keysym && match(bp->mod, e->state)) {
+			if (IS_SET(WMODE_ALTSCREEN) ?
+			    bp->altscreen < 0 :
+			    bp->altscreen > 0)
+				continue;
 			bp->func(&(bp->arg));
 			return;
 		}

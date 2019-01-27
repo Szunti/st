@@ -1619,6 +1619,7 @@ tsetmode(int priv, int set, int *args, int narg)
 					tclearregion(0, 0, term.col-1,
 							term.row-1);
 				}
+				xsetmode(set, WMODE_ALTSCREEN);
 				break;
 			case 1048:
 				tcursor((set) ? CURSOR_SAVE : CURSOR_LOAD);
