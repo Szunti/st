@@ -1542,24 +1542,24 @@ tsetmode(int priv, int set, int *args, int narg)
 				xsetmode(set, MODE_8BIT);
 				break;
 			case 1049: /* swap screen & set/restore cursor as xterm */
-				if (!allowaltscreen)
-					break;
-				tcursor((set) ? CURSOR_SAVE : CURSOR_LOAD);
-				/* FALLTHROUGH */
 			case 47: /* swap screen */
 			case 1047:
 				if (!allowaltscreen)
 					break;
 				alt = IS_SET(MODE_ALTSCREEN);
+				if (set ^ alt) { /* set is always 1 or 0 */
+					if (*args == 1049 && set) /* normal -> alternate */
+						tcursor(CURSOR_SAVE);
+					tswapscreen();
+					if (*args == 1049 && !set) /* alternate -> normal */
+						tcursor(CURSOR_LOAD);
+				}
+				alt = IS_SET(MODE_ALTSCREEN);
 				if (alt) {
 					tclearregion(0, 0, term.col-1,
 							term.row-1);
 				}
-				if (set ^ alt) /* set is always 1 or 0 */
-					tswapscreen();
-				if (*args != 1049)
-					break;
-				/* FALLTHROUGH */
+				break;
 			case 1048:
 				tcursor((set) ? CURSOR_SAVE : CURSOR_LOAD);
 				break;
