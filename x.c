@@ -27,12 +27,17 @@ typedef struct {
 	KeySym keysym;
 	void (*func)(const Arg *);
 	const Arg arg;
+	/* three-valued logic variables: 0 indifferent, 1 on, -1 off */
+	signed char altscreen;
 } Shortcut;
 
 typedef struct {
-	uint b;
 	uint mask;
-	char *s;
+	uint b;
+	void (*func)(const Arg *);
+	const Arg arg;
+	/* three-valued logic variables: 0 indifferent, 1 on, -1 off */
+	signed char altscreen;
 } MouseShortcut;
 
 typedef struct {
@@ -56,6 +61,12 @@ typedef struct {
 	enum resource_type type;
 	void *dst;
 } ResourcePref;
+
+typedef struct {
+	uint b;
+	uint mask;
+	char *s;
+} MouseKey;
 
 /* X modifiers */
 #define XK_ANY_MOD    UINT_MAX
@@ -289,7 +300,7 @@ selpaste(const Arg *dummy)
 void
 numlock(const Arg *dummy)
 {
-	win.mode ^= MODE_NUMLOCK;
+	win.mode ^= WMODE_NUMLOCK;
 }
 
 void
@@ -367,17 +378,17 @@ mousereport(XEvent *e)
 	if (e->xbutton.type == MotionNotify) {
 		if (x == ox && y == oy)
 			return;
-		if (!IS_SET(MODE_MOUSEMOTION) && !IS_SET(MODE_MOUSEMANY))
+		if (!IS_SET(WMODE_MOUSEMOTION) && !IS_SET(WMODE_MOUSEMANY))
 			return;
 		/* MOUSE_MOTION: no reporting if no button is pressed */
-		if (IS_SET(MODE_MOUSEMOTION) && oldbutton == 3)
+		if (IS_SET(WMODE_MOUSEMOTION) && oldbutton == 3)
 			return;
 
 		button = oldbutton + 32;
 		ox = x;
 		oy = y;
 	} else {
-		if (!IS_SET(MODE_MOUSESGR) && e->xbutton.type == ButtonRelease) {
+		if (!IS_SET(WMODE_MOUSESGR) && e->xbutton.type == ButtonRelease) {
 			button = 3;
 		} else {
 			button -= Button1;
@@ -390,21 +401,21 @@ mousereport(XEvent *e)
 			oy = y;
 		} else if (e->xbutton.type == ButtonRelease) {
 			oldbutton = 3;
-			/* MODE_MOUSEX10: no button release reporting */
-			if (IS_SET(MODE_MOUSEX10))
+			/* WMODE_MOUSEX10: no button release reporting */
+			if (IS_SET(WMODE_MOUSEX10))
 				return;
 			if (button == 64 || button == 65)
 				return;
 		}
 	}
 
-	if (!IS_SET(MODE_MOUSEX10)) {
+	if (!IS_SET(WMODE_MOUSEX10)) {
 		button += ((state & ShiftMask  ) ? 4  : 0)
 			+ ((state & Mod4Mask   ) ? 8  : 0)
 			+ ((state & ControlMask) ? 16 : 0);
 	}
 
-	if (IS_SET(MODE_MOUSESGR)) {
+	if (IS_SET(WMODE_MOUSESGR)) {
 		len = snprintf(buf, sizeof(buf), "\033[<%d;%d;%d%c",
 				button, x+1, y+1,
 				e->xbutton.type == ButtonRelease ? 'm' : 'M');
@@ -423,9 +434,10 @@ bpress(XEvent *e)
 {
 	struct timespec now;
 	MouseShortcut *ms;
+	MouseKey *mk;
 	int snap;
 
-	if (IS_SET(MODE_MOUSE) && !(e->xbutton.state & forceselmod)) {
+	if (IS_SET(WMODE_MOUSE) && !(e->xbutton.state & forceselmod)) {
 		mousereport(e);
 		return;
 	}
@@ -433,7 +445,19 @@ bpress(XEvent *e)
 	for (ms = mshortcuts; ms < mshortcuts + LEN(mshortcuts); ms++) {
 		if (e->xbutton.button == ms->b
 				&& match(ms->mask, e->xbutton.state)) {
-			ttywrite(ms->s, strlen(ms->s), 1);
+			if (IS_SET(WMODE_ALTSCREEN) ?
+			    ms->altscreen < 0 :
+			    ms->altscreen > 0)
+				continue;
+			ms->func(&(ms->arg));
+			return;
+		}
+        }
+
+	for (mk = mkeys; mk < mkeys + LEN(mkeys); mk++) {
+		if (e->xbutton.button == mk->b
+				&& match(mk->mask, e->xbutton.state)) {
+			ttywrite(mk->s, strlen(mk->s), 1);
 			return;
 		}
 	}
@@ -542,10 +566,10 @@ selnotify(XEvent *e)
 			*repl++ = '\r';
 		}
 
-		if (IS_SET(MODE_BRCKTPASTE) && ofs == 0)
+		if (IS_SET(WMODE_BRCKTPASTE) && ofs == 0)
 			ttywrite("\033[200~", 6, 0);
 		ttywrite((char *)data, nitems * format / 8, 1);
-		if (IS_SET(MODE_BRCKTPASTE) && rem == 0)
+		if (IS_SET(WMODE_BRCKTPASTE) && rem == 0)
 			ttywrite("\033[201~", 6, 0);
 		XFree(data);
 		/* number of 32-bit chunks returned */
@@ -652,7 +676,7 @@ xsetsel(char *str)
 void
 brelease(XEvent *e)
 {
-	if (IS_SET(MODE_MOUSE) && !(e->xbutton.state & forceselmod)) {
+	if (IS_SET(WMODE_MOUSE) && !(e->xbutton.state & forceselmod)) {
 		mousereport(e);
 		return;
 	}
@@ -666,7 +690,7 @@ brelease(XEvent *e)
 void
 bmotion(XEvent *e)
 {
-	if (IS_SET(MODE_MOUSE) && !(e->xbutton.state & forceselmod)) {
+	if (IS_SET(WMODE_MOUSE) && !(e->xbutton.state & forceselmod)) {
 		mousereport(e);
 		return;
 	}
@@ -790,7 +814,7 @@ void
 xclear(int x1, int y1, int x2, int y2)
 {
 	XftDrawRect(xw.draw,
-			&dc.col[IS_SET(MODE_REVERSE)? defaultfg : defaultbg],
+			&dc.col[IS_SET(WMODE_REVERSE)? defaultfg : defaultbg],
 			x1, y1, x2-x1, y2-y1);
 }
 
@@ -1117,7 +1141,7 @@ xinit(int cols, int rows)
 	XChangeProperty(xw.dpy, xw.win, xw.netwmpid, XA_CARDINAL, 32,
 			PropModeReplace, (uchar *)&thispid, 1);
 
-	win.mode = MODE_NUMLOCK;
+	win.mode = WMODE_NUMLOCK;
 	resettitle();
 	XMapWindow(xw.dpy, xw.win);
 	xhints();
@@ -1312,7 +1336,7 @@ xdrawglyphfontspecs(const XftGlyphFontSpec *specs, Glyph base, int len, int x, i
 	if ((base.mode & ATTR_BOLD_FAINT) == ATTR_BOLD && BETWEEN(base.fg, 0, 7))
 		fg = &dc.col[base.fg + 8];
 
-	if (IS_SET(MODE_REVERSE)) {
+	if (IS_SET(WMODE_REVERSE)) {
 		if (fg == &dc.col[defaultfg]) {
 			fg = &dc.col[defaultbg];
 		} else {
@@ -1353,7 +1377,7 @@ xdrawglyphfontspecs(const XftGlyphFontSpec *specs, Glyph base, int len, int x, i
 		bg = temp;
 	}
 
-	if (base.mode & ATTR_BLINK && win.mode & MODE_BLINK)
+	if (base.mode & ATTR_BLINK && win.mode & WMODE_BLINK)
 		fg = bg;
 
 	if (base.mode & ATTR_INVISIBLE)
@@ -1422,7 +1446,7 @@ xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og)
 		og.mode ^= ATTR_REVERSE;
 	xdrawglyph(og, ox, oy);
 
-	if (IS_SET(MODE_HIDE))
+	if (IS_SET(WMODE_HIDE))
 		return;
 
 	/*
@@ -1430,7 +1454,7 @@ xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og)
 	 */
 	g.mode &= ATTR_BOLD|ATTR_ITALIC|ATTR_UNDERLINE|ATTR_STRUCK|ATTR_WIDE;
 
-	if (IS_SET(MODE_REVERSE)) {
+	if (IS_SET(WMODE_REVERSE)) {
 		g.mode |= ATTR_REVERSE;
 		g.bg = defaultfg;
 		if (selected(cx, cy)) {
@@ -1452,7 +1476,7 @@ xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og)
 	}
 
 	/* draw the new one */
-	if (IS_SET(MODE_FOCUSED)) {
+	if (IS_SET(WMODE_FOCUSED)) {
 		switch (win.cursor) {
 		case 7: /* st extension: snowman (U+2603) */
 			g.u = 0x2603;
@@ -1522,7 +1546,7 @@ xsettitle(char *p)
 int
 xstartdraw(void)
 {
-	return IS_SET(MODE_VISIBLE);
+	return IS_SET(WMODE_VISIBLE);
 }
 
 void
@@ -1562,7 +1586,7 @@ xfinishdraw(void)
 	XCopyArea(xw.dpy, xw.buf, xw.win, dc.gc, 0, 0, win.w,
 			win.h, 0, 0);
 	XSetForeground(xw.dpy, dc.gc,
-			dc.col[IS_SET(MODE_REVERSE)?
+			dc.col[IS_SET(WMODE_REVERSE)?
 				defaultfg : defaultbg].pixel);
 }
 
@@ -1577,13 +1601,13 @@ visibility(XEvent *ev)
 {
 	XVisibilityEvent *e = &ev->xvisibility;
 
-	MODBIT(win.mode, e->state != VisibilityFullyObscured, MODE_VISIBLE);
+	MODBIT(win.mode, e->state != VisibilityFullyObscured, WMODE_VISIBLE);
 }
 
 void
 unmap(XEvent *ev)
 {
-	win.mode &= ~MODE_VISIBLE;
+	win.mode &= ~WMODE_VISIBLE;
 }
 
 void
@@ -1598,7 +1622,7 @@ xsetmode(int set, unsigned int flags)
 {
 	int mode = win.mode;
 	MODBIT(win.mode, set, flags);
-	if ((win.mode & MODE_REVERSE) != (mode & MODE_REVERSE))
+	if ((win.mode & WMODE_REVERSE) != (mode & WMODE_REVERSE))
 		redraw();
 }
 
@@ -1625,7 +1649,7 @@ xseturgency(int add)
 void
 xbell(void)
 {
-	if (!(IS_SET(MODE_FOCUSED)))
+	if (!(IS_SET(WMODE_FOCUSED)))
 		xseturgency(1);
 	if (bellvolume)
 		XkbBell(xw.dpy, xw.win, bellvolume, (Atom)NULL);
@@ -1641,14 +1665,14 @@ focus(XEvent *ev)
 
 	if (ev->type == FocusIn) {
 		XSetICFocus(xw.xic);
-		win.mode |= MODE_FOCUSED;
+		win.mode |= WMODE_FOCUSED;
 		xseturgency(0);
-		if (IS_SET(MODE_FOCUS))
+		if (IS_SET(WMODE_FOCUS))
 			ttywrite("\033[I", 3, 0);
 	} else {
 		XUnsetICFocus(xw.xic);
-		win.mode &= ~MODE_FOCUSED;
-		if (IS_SET(MODE_FOCUS))
+		win.mode &= ~WMODE_FOCUSED;
+		if (IS_SET(WMODE_FOCUS))
 			ttywrite("\033[O", 3, 0);
 	}
 }
@@ -1682,12 +1706,12 @@ kmap(KeySym k, uint state)
 		if (!match(kp->mask, state))
 			continue;
 
-		if (IS_SET(MODE_APPKEYPAD) ? kp->appkey < 0 : kp->appkey > 0)
+		if (IS_SET(WMODE_APPKEYPAD) ? kp->appkey < 0 : kp->appkey > 0)
 			continue;
-		if (IS_SET(MODE_NUMLOCK) && kp->appkey == 2)
+		if (IS_SET(WMODE_NUMLOCK) && kp->appkey == 2)
 			continue;
 
-		if (IS_SET(MODE_APPCURSOR) ? kp->appcursor < 0 : kp->appcursor > 0)
+		if (IS_SET(WMODE_APPCURSOR) ? kp->appcursor < 0 : kp->appcursor > 0)
 			continue;
 
 		return kp->s;
@@ -1707,13 +1731,17 @@ kpress(XEvent *ev)
 	Status status;
 	Shortcut *bp;
 
-	if (IS_SET(MODE_KBDLOCK))
+	if (IS_SET(WMODE_KBDLOCK))
 		return;
 
 	len = XmbLookupString(xw.xic, e, buf, sizeof buf, &ksym, &status);
 	/* 1. shortcuts */
 	for (bp = shortcuts; bp < shortcuts + LEN(shortcuts); bp++) {
 		if (ksym == bp->keysym && match(bp->mod, e->state)) {
+			if (IS_SET(WMODE_ALTSCREEN) ?
+			    bp->altscreen < 0 :
+			    bp->altscreen > 0)
+				continue;
 			bp->func(&(bp->arg));
 			return;
 		}
@@ -1729,7 +1757,7 @@ kpress(XEvent *ev)
 	if (len == 0)
 		return;
 	if (len == 1 && e->state & Mod1Mask) {
-		if (IS_SET(MODE_8BIT)) {
+		if (IS_SET(WMODE_8BIT)) {
 			if (*buf < 0177) {
 				c = *buf | 0x80;
 				len = utf8encode(c, buf);
@@ -1753,10 +1781,10 @@ cmessage(XEvent *e)
 	 */
 	if (e->xclient.message_type == xw.xembed && e->xclient.format == 32) {
 		if (e->xclient.data.l[1] == XEMBED_FOCUS_IN) {
-			win.mode |= MODE_FOCUSED;
+			win.mode |= WMODE_FOCUSED;
 			xseturgency(0);
 		} else if (e->xclient.data.l[1] == XEMBED_FOCUS_OUT) {
-			win.mode &= ~MODE_FOCUSED;
+			win.mode &= ~WMODE_FOCUSED;
 		}
 	} else if (e->xclient.data.l[0] == xw.wmdeletewin) {
 		ttyhangup();
@@ -1821,7 +1849,7 @@ run(void)
 			if (blinktimeout) {
 				blinkset = tattrset(ATTR_BLINK);
 				if (!blinkset)
-					MODBIT(win.mode, 0, MODE_BLINK);
+					MODBIT(win.mode, 0, WMODE_BLINK);
 			}
 		}
 
@@ -1836,7 +1864,7 @@ run(void)
 		dodraw = 0;
 		if (blinktimeout && TIMEDIFF(now, lastblink) > blinktimeout) {
 			tsetdirtattr(ATTR_BLINK);
-			win.mode ^= MODE_BLINK;
+			win.mode ^= WMODE_BLINK;
 			lastblink = now;
 			dodraw = 1;
 		}

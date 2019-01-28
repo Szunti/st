@@ -190,7 +190,7 @@ ResourcePref resources[] = {
  * Internal mouse shortcuts.
  * Beware that overloading Button1 will disable the selection.
  */
-static MouseShortcut mshortcuts[] = {
+static MouseKey mkeys[] = {
 	/* button               mask            string */
 	{ Button4,              XK_ANY_MOD,     "\031" },
 	{ Button5,              XK_ANY_MOD,     "\005" },
@@ -200,20 +200,28 @@ static MouseShortcut mshortcuts[] = {
 #define MODKEY Mod1Mask
 #define TERMMOD (ControlMask|ShiftMask)
 
+static MouseShortcut mshortcuts[] = {
+	/* mask        button          function        argument  altscreen */
+	{ XK_NO_MOD,   Button4,        kscrollup,      {.i =  5},  -1},
+	{ XK_NO_MOD,   Button5,        kscrolldown,    {.i =  5},  -1},
+};
+
 static Shortcut shortcuts[] = {
-	/* mask                 keysym          function        argument */
-	{ XK_ANY_MOD,           XK_Break,       sendbreak,      {.i =  0} },
-	{ ControlMask,          XK_Print,       toggleprinter,  {.i =  0} },
-	{ ShiftMask,            XK_Print,       printscreen,    {.i =  0} },
-	{ XK_ANY_MOD,           XK_Print,       printsel,       {.i =  0} },
-	{ TERMMOD,              XK_Prior,       zoom,           {.f = +1} },
-	{ TERMMOD,              XK_Next,        zoom,           {.f = -1} },
-	{ TERMMOD,              XK_Home,        zoomreset,      {.f =  0} },
-	{ TERMMOD,              XK_C,           clipcopy,       {.i =  0} },
-	{ TERMMOD,              XK_V,           clippaste,      {.i =  0} },
-	{ TERMMOD,              XK_Y,           selpaste,       {.i =  0} },
-	{ ShiftMask,            XK_Insert,      selpaste,       {.i =  0} },
-	{ TERMMOD,              XK_Num_Lock,    numlock,        {.i =  0} },
+	/* mask        keysym          function        argument  altscreen */
+	{ XK_ANY_MOD,  XK_Break,       sendbreak,      {.i =  0},   0},
+	{ ControlMask, XK_Print,       toggleprinter,  {.i =  0},   0},
+	{ ShiftMask,   XK_Print,       printscreen,    {.i =  0},   0},
+	{ XK_ANY_MOD,  XK_Print,       printsel,       {.i =  0},   0},
+	{ TERMMOD,     XK_Prior,       zoom,           {.f = +1},   0},
+	{ TERMMOD,     XK_Next,        zoom,           {.f = -1},   0},
+	{ TERMMOD,     XK_Home,        zoomreset,      {.f =  0},   0},
+	{ TERMMOD,     XK_C,           clipcopy,       {.i =  0},   0},
+	{ TERMMOD,     XK_V,           clippaste,      {.i =  0},   0},
+	{ TERMMOD,     XK_Y,           selpaste,       {.i =  0},   0},
+	{ ShiftMask,   XK_Insert,      selpaste,       {.i =  0},   0},
+	{ TERMMOD,     XK_Num_Lock,    numlock,        {.i =  0},   0},
+	{ ShiftMask,   XK_Page_Up,     kscrollup,      {.i = -1},  -1},
+	{ ShiftMask,   XK_Page_Down,   kscrolldown,    {.i = -1},  -1},
 };
 
 /*
