@@ -123,7 +123,7 @@ typedef struct {
 	Line *alt;    /* alternate screen */
 	Line hist[HISTSIZE]; /* history buffer */
 	int histi;    /* history index */
-	int histmax;  /* maximum history index reached */
+	int histnum;  /* maximum history index reached */
 	int scr;      /* scroll back */
 	int *dirty;   /* dirtyness of lines */
 	TCursor c;    /* cursor */
@@ -1096,10 +1096,10 @@ kscrollup(const Arg* a)
 	if (n < 0)
 		n = term.row + n;
 
-	if (n > term.histmax - term.scr)
-		n = term.histmax - term.scr;
+	if (n > term.histnum - term.scr)
+		n = term.histnum - term.scr;
 
-	if (term.scr < term.histmax) {
+	if (term.scr < term.histnum) {
 		term.scr += n;
 		selscroll(0, n);
 		tfulldirt();
@@ -1114,11 +1114,14 @@ tscrolldown(int orig, int n, int copyhist)
 
 	LIMIT(n, 0, term.bot-orig+1);
 
+	copyhist = copyhist & !IS_SET(MODE_ALTSCREEN);
 	if (copyhist) {
-		term.histi = (term.histi - 1 + HISTSIZE) % HISTSIZE;
 		temp = term.hist[term.histi];
 		term.hist[term.histi] = term.line[term.bot];
 		term.line[term.bot] = temp;
+		term.histi = (term.histi - 1 + HISTSIZE) % HISTSIZE;
+		if (term.histnum > 0)
+			--term.histnum;
 	}
 
 	tsetdirt(orig, term.bot-n);
@@ -1141,16 +1144,14 @@ tscrollup(int orig, int n, int copyhist)
 
 	LIMIT(n, 0, term.bot-orig+1);
 
-        copyhist = copyhist & !IS_SET(MODE_ALTSCREEN);
+	copyhist = copyhist & !IS_SET(MODE_ALTSCREEN);
 	if (copyhist) {
 		term.histi = (term.histi + 1) % HISTSIZE;
-		if (term.histi == 0)
-			term.histmax = HISTSIZE;
-		if (term.histi > term.histmax)
-			term.histmax = term.histi;
 		temp = term.hist[term.histi];
 		term.hist[term.histi] = term.line[orig];
 		term.line[orig] = temp;
+		if (term.histnum < HISTSIZE)
+			++term.histnum;
 	}
 
 	if (term.scr > 0 && term.scr < HISTSIZE)
