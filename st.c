@@ -1134,6 +1134,7 @@ tscrollup(int orig, int n, int copyhist)
 
 	LIMIT(n, 0, term.bot-orig+1);
 
+        copyhist = copyhist & !IS_SET(MODE_ALTSCREEN);
 	if (copyhist) {
 		term.histi = (term.histi + 1) % HISTSIZE;
 		if (term.histi == 0)
