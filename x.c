@@ -99,6 +99,8 @@ typedef XftDraw *Draw;
 typedef XftColor Color;
 typedef XftGlyphFontSpec GlyphFontSpec;
 
+#define DRAWLIMIT 10.0
+
 /* Purely graphic info */
 typedef struct {
 	int tw, th; /* tty width and height */
@@ -1675,6 +1677,7 @@ focus(XEvent *ev)
 		if (IS_SET(WMODE_FOCUS))
 			ttywrite("\033[O", 3, 0);
 	}
+	redraw();
 }
 
 int
@@ -1807,10 +1810,13 @@ run(void)
 	XEvent ev;
 	int w = win.w, h = win.h;
 	fd_set rfd;
-	int xfd = XConnectionNumber(xw.dpy), xev, blinkset = 0, dodraw = 0;
+	int xfd = XConnectionNumber(xw.dpy), blinkset = 0;
 	int ttyfd;
-	struct timespec drawtimeout, *tv = NULL, now, last, lastblink;
+	struct timespec timeout, *tv = NULL, now, last, lastblink;
+	float drawrate = 0.0;
 	long deltatime;
+	long drawtimeout_nsec = 600 * 1E9;
+	long blinktimeout_nsec = 600 * 1E9;
 
 	/* Waiting for window mapping */
 	do {
@@ -1834,7 +1840,7 @@ run(void)
 	clock_gettime(CLOCK_MONOTONIC, &last);
 	lastblink = last;
 
-	for (xev = actionfps;;) {
+	for (;;) {
 		FD_ZERO(&rfd);
 		FD_SET(ttyfd, &rfd);
 		FD_SET(xfd, &rfd);
@@ -1852,29 +1858,7 @@ run(void)
 					MODBIT(win.mode, 0, WMODE_BLINK);
 			}
 		}
-
-		if (FD_ISSET(xfd, &rfd))
-			xev = actionfps;
-
-		clock_gettime(CLOCK_MONOTONIC, &now);
-		drawtimeout.tv_sec = 0;
-		drawtimeout.tv_nsec =  (1000 * 1E6)/ xfps;
-		tv = &drawtimeout;
-
-		dodraw = 0;
-		if (blinktimeout && TIMEDIFF(now, lastblink) > blinktimeout) {
-			tsetdirtattr(ATTR_BLINK);
-			win.mode ^= WMODE_BLINK;
-			lastblink = now;
-			dodraw = 1;
-		}
-		deltatime = TIMEDIFF(now, last);
-		if (deltatime > 1000 / (xev ? xfps : actionfps)) {
-			dodraw = 1;
-			last = now;
-		}
-
-		if (dodraw) {
+		if (FD_ISSET(xfd, &rfd)) {
 			while (XPending(xw.dpy)) {
 				XNextEvent(xw.dpy, &ev);
 				if (XFilterEvent(&ev, None))
@@ -1882,31 +1866,46 @@ run(void)
 				if (handler[ev.type])
 					(handler[ev.type])(&ev);
 			}
+		}
 
-			draw();
-			XFlush(xw.dpy);
+		clock_gettime(CLOCK_MONOTONIC, &now);
+		if (blinktimeout && blinkset) {
+			deltatime = TIMEDIFF(now, lastblink) - blinktimeout;
+			if (deltatime > 0) {
+				tsetdirtattr(ATTR_BLINK);
+				win.mode ^= WMODE_BLINK;
+				lastblink = now;
+				blinktimeout_nsec = 1E6 * blinktimeout;
+			} else
+				blinktimeout_nsec = 1E6 * (-deltatime);
+		} else
+			/* practical infinite */
+			blinktimeout_nsec = 600 * 1E9;
 
-			if (xev && !FD_ISSET(xfd, &rfd))
-				xev--;
-			if (!FD_ISSET(ttyfd, &rfd) && !FD_ISSET(xfd, &rfd)) {
-				if (blinkset) {
-					if (TIMEDIFF(now, lastblink) \
-							> blinktimeout) {
-						drawtimeout.tv_nsec = 1000;
-					} else {
-						drawtimeout.tv_nsec = (1E6 * \
-							(blinktimeout - \
-							TIMEDIFF(now,
-								lastblink)));
-					}
-					drawtimeout.tv_sec = \
-					    drawtimeout.tv_nsec / 1E9;
-					drawtimeout.tv_nsec %= (long)1E9;
-				} else {
-					tv = NULL;
-				}
+		/* drawrate increases when redraws are more frequent than xfps,
+		 * decreases when less frequent. There is a small buffer depending
+		 * on DRAWLIMIT. After that fps is throttled.
+		 */
+		drawrate -= TIMEDIFF(now, last) * xfps / 1000.0;
+		last = now;
+		if (drawrate < 0.0) {
+			drawrate = 0.0;
+		}
+		if (tdirty()) {
+			if (drawrate < DRAWLIMIT) {
+				draw();
+				XFlush(xw.dpy);
+				++drawrate;
+				/* practical infinite */
+				drawtimeout_nsec = 600 * 1E9;
+			} else {
+				drawtimeout_nsec = 1000 * 1E6 / xfps;
 			}
 		}
+		timeout.tv_nsec = MIN(drawtimeout_nsec, blinktimeout_nsec);
+		timeout.tv_sec = timeout.tv_nsec / 1E9;
+		timeout.tv_nsec %= (long)1E9;
+		tv = &timeout;
 	}
 }
 

@@ -88,6 +88,7 @@ void sendbreak(const Arg *);
 void toggleprinter(const Arg *);
 
 int tattrset(int);
+int tdirty();
 void tnew(int, int);
 void tresize(int, int);
 void tsetdirtattr(int);

@@ -127,6 +127,7 @@ typedef struct {
 	int scr;      /* scroll back */
 	int *dirty;   /* dirtyness of lines */
 	TCursor c;    /* cursor */
+	int cursorchanged; /* cursor position changed */
 	int ocx;      /* old cursor col */
 	int ocy;      /* old cursor row */
 	int top;      /* top    scroll limit */
@@ -976,6 +977,19 @@ tattrset(int attr)
 	return 0;
 }
 
+int
+tdirty()
+{
+	int i;
+	if (term.cursorchanged)
+		return 1;
+        for (i = 0; i < term.row; i++) {
+		if (term.dirty[i])
+			return 1;
+	}
+	return 0;
+}
+
 void
 tsetdirt(int top, int bot)
 {
@@ -1264,6 +1278,7 @@ tmoveto(int x, int y)
 	term.c.state &= ~CURSOR_WRAPNEXT;
 	term.c.x = LIMIT(x, 0, term.col-1);
 	term.c.y = LIMIT(y, miny, maxy);
+	term.cursorchanged = 1;
 }
 
 void
@@ -2119,6 +2134,7 @@ tputtab(int n)
 				/* nothing */ ;
 	}
 	term.c.x = LIMIT(x, 0, term.col-1);
+	term.cursorchanged = 1;
 }
 
 void
@@ -2672,6 +2688,7 @@ draw(void)
 	if (term.scr == 0)
 		xdrawcursor(cx, term.c.y, term.line[term.c.y][cx],
 				term.ocx, term.ocy, term.line[term.ocy][term.ocx]);
+	term.cursorchanged = 0;
 	term.ocx = cx, term.ocy = term.c.y;
 	xfinishdraw();
 }
