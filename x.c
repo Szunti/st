@@ -1810,9 +1810,9 @@ run(void)
 	XEvent ev;
 	int w = win.w, h = win.h;
 	fd_set rfd;
-	int xfd = XConnectionNumber(xw.dpy), blinkset = 0;
+	int xfd = XConnectionNumber(xw.dpy), blinkset = 0, shouldwait = 0;
 	int ttyfd;
-	struct timespec timeout, *tv = NULL, now, last, lastblink;
+	struct timespec timeout, *tv = NULL, now, last, lastblink, lastinput;
 	float drawrate = 0.0;
 	long deltatime;
 	long drawtimeout_nsec = 600 * 1E9;
@@ -1838,7 +1838,7 @@ run(void)
 	cresize(w, h);
 
 	clock_gettime(CLOCK_MONOTONIC, &last);
-	lastblink = last;
+	lastinput = lastblink = last;
 
 	for (;;) {
 		FD_ZERO(&rfd);
@@ -1850,6 +1850,8 @@ run(void)
 				continue;
 			die("select failed: %s\n", strerror(errno));
 		}
+		clock_gettime(CLOCK_MONOTONIC, &now);
+
 		if (FD_ISSET(ttyfd, &rfd)) {
 			ttyread();
 			if (blinktimeout) {
@@ -1857,6 +1859,12 @@ run(void)
 				if (!blinkset)
 					MODBIT(win.mode, 0, WMODE_BLINK);
 			}
+			/* Wait a bit for more input before drawing. Should help
+			 * with flickering.
+			 */
+			if (!shouldwait)
+				lastinput = now;
+			shouldwait = 1;
 		}
 		if (FD_ISSET(xfd, &rfd)) {
 			while (XPending(xw.dpy)) {
@@ -1868,7 +1876,6 @@ run(void)
 			}
 		}
 
-		clock_gettime(CLOCK_MONOTONIC, &now);
 		if (blinktimeout && blinkset) {
 			deltatime = TIMEDIFF(now, lastblink) - blinktimeout;
 			if (deltatime > 0) {
@@ -1891,8 +1898,19 @@ run(void)
 		if (drawrate < 0.0) {
 			drawrate = 0.0;
 		}
+		if (drawrate > 0.0) {
+			shouldwait = 0;
+		}
 		if (tdirty()) {
-			if (drawrate < DRAWLIMIT) {
+			if (shouldwait) {
+				deltatime = TIMEDIFF(now, lastinput)
+					- 1000 / xfps / 3;
+				if (deltatime > 0) {
+					shouldwait = 0;
+				} else {
+					drawtimeout_nsec = 1E6 * (-deltatime);
+				}
+			} else if (drawrate < DRAWLIMIT) {
 				draw();
 				XFlush(xw.dpy);
 				++drawrate;
