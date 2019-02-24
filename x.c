@@ -1903,8 +1903,7 @@ run(void)
 		}
 		if (tdirty()) {
 			if (shouldwait) {
-				deltatime = TIMEDIFF(now, lastinput)
-					- 1000 / xfps / 3;
+				deltatime = TIMEDIFF(now, lastinput) - 5;
 				if (deltatime > 0) {
 					shouldwait = 0;
 				} else {
