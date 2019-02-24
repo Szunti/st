@@ -1810,7 +1810,8 @@ run(void)
 	XEvent ev;
 	int w = win.w, h = win.h;
 	fd_set rfd;
-	int xfd = XConnectionNumber(xw.dpy), blinkset = 0, shouldwait = 0;
+	int xfd = XConnectionNumber(xw.dpy);
+	int blinkset = 0, shouldwait = 0, dirty = 0;
 	int ttyfd;
 	struct timespec timeout, *tv = NULL, now, last, lastblink, lastinput;
 	float drawrate = 0.0;
@@ -1862,9 +1863,10 @@ run(void)
 			/* Wait a bit for more input before drawing. Should help
 			 * with flickering.
 			 */
-			if (!shouldwait)
+			if (!shouldwait) {
 				lastinput = now;
-			shouldwait = 1;
+				shouldwait = 1;
+			}
 		}
 		if (FD_ISSET(xfd, &rfd)) {
 			while (XPending(xw.dpy)) {
@@ -1898,26 +1900,28 @@ run(void)
 		if (drawrate < 0.0) {
 			drawrate = 0.0;
 		}
+
 		if (drawrate > 0.0) {
 			shouldwait = 0;
 		}
-		if (tdirty()) {
-			if (shouldwait) {
-				deltatime = TIMEDIFF(now, lastinput) - 5;
-				if (deltatime > 0) {
-					shouldwait = 0;
-				} else {
-					drawtimeout_nsec = 1E6 * (-deltatime);
-				}
-			} else if (drawrate < DRAWLIMIT) {
-				draw();
-				XFlush(xw.dpy);
-				++drawrate;
-				/* practical infinite */
-				drawtimeout_nsec = 600 * 1E9;
+		/* wait for more input */
+		if (shouldwait) {
+			deltatime = TIMEDIFF(now, lastinput) - 5;
+			if (deltatime > 0) {
+				shouldwait = 0;
 			} else {
-				drawtimeout_nsec = 1000 * 1E6 / xfps;
+				drawtimeout_nsec = 1E6 * (-deltatime);
 			}
+		/* keep xfps because we drew a lot lately */
+		} else if (drawrate > DRAWLIMIT) {
+			drawtimeout_nsec = 1000 * 1E6 / xfps;
+		/* can draw without waiting */
+		} else if (tdirty()) {
+			draw();
+			XFlush(xw.dpy);
+			++drawrate;
+			/* practical infinite */
+			drawtimeout_nsec = 600 * 1E9;
 		}
 		timeout.tv_nsec = MIN(drawtimeout_nsec, blinktimeout_nsec);
 		timeout.tv_sec = timeout.tv_nsec / 1E9;
