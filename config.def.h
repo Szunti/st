@@ -41,8 +41,8 @@ static unsigned int tripleclicktimeout = 600;
 /* alt screens */
 int allowaltscreen = 1;
 
-/* frames per second st should at maximum draw to the screen */
-static unsigned int xfps = 60;
+/* frames per second st should maintain even when flooded with input */
+static unsigned int xfps = 30;
 /*
  * blinking timeout (set to 0 to disable blinking) for the terminal blinking
  * attribute.
