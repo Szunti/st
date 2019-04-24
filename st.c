@@ -1002,19 +1002,22 @@ tsetdirt(int top, int bot)
 		term.dirty[i] = 1;
 }
 
-void
+int
 tsetdirtattr(int attr)
 {
 	int i, j;
+	int dirty = 0;
 
 	for (i = 0; i < term.row; i++) {
 		for (j = 0; j < term.col; j++) {
 			if (term.line[i][j].mode & attr) {
 				tsetdirt(i, i);
+				dirty = 1;
 				break;
 			}
 		}
 	}
+	return dirty;
 }
 
 void

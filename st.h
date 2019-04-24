@@ -91,7 +91,7 @@ int tattrset(int);
 int tdirty();
 void tnew(int, int);
 void tresize(int, int);
-void tsetdirtattr(int);
+int tsetdirtattr(int);
 void ttyhangup(void);
 int ttynew(char *, char *, char *, char **);
 size_t ttyread(void);

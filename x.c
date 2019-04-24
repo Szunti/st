@@ -1811,13 +1811,14 @@ run(void)
 	int w = win.w, h = win.h;
 	fd_set rfd;
 	int xfd = XConnectionNumber(xw.dpy);
-	int blinkset = 0, shouldwait = 0, dirty = 0;
+	int shouldwait = 0, dirty = 0;
 	int ttyfd;
 	struct timespec timeout, *tv = NULL, now, last, lastblink, lastinput;
 	float drawrate = 0.0;
 	long deltatime;
 	long drawtimeout_nsec = 600 * 1E9;
 	long blinktimeout_nsec = 600 * 1E9;
+	long inputtimeout_nsec = 600 * 1E9;
 
 	/* Waiting for window mapping */
 	do {
@@ -1855,11 +1856,6 @@ run(void)
 
 		if (FD_ISSET(ttyfd, &rfd)) {
 			ttyread();
-			if (blinktimeout) {
-				blinkset = tattrset(ATTR_BLINK);
-				if (!blinkset)
-					MODBIT(win.mode, 0, WMODE_BLINK);
-			}
 			/* Wait a bit for more input before drawing. Should help
 			 * with flickering.
 			 */
@@ -1878,11 +1874,14 @@ run(void)
 			}
 		}
 
-		if (blinktimeout && blinkset) {
+		if (blinktimeout) {
 			deltatime = TIMEDIFF(now, lastblink) - blinktimeout;
 			if (deltatime > 0) {
-				tsetdirtattr(ATTR_BLINK);
-				win.mode ^= WMODE_BLINK;
+				if (tsetdirtattr(ATTR_BLINK)) {
+					win.mode ^= WMODE_BLINK;
+				} else
+					MODBIT(win.mode, 0, WMODE_BLINK);
+
 				lastblink = now;
 				blinktimeout_nsec = 1E6 * blinktimeout;
 			} else
@@ -1904,26 +1903,30 @@ run(void)
 		if (drawrate > 0.0) {
 			shouldwait = 0;
 		}
-		/* wait for more input */
+
+		/* practical infinite */
+		inputtimeout_nsec = 600 * 1E9;
 		if (shouldwait) {
 			deltatime = TIMEDIFF(now, lastinput) - 5;
 			if (deltatime > 0) {
 				shouldwait = 0;
 			} else {
-				drawtimeout_nsec = 1E6 * (-deltatime);
+				inputtimeout_nsec = 1E6 * (-deltatime);
 			}
+		}
 		/* keep xfps because we drew a lot lately */
-		} else if (drawrate > DRAWLIMIT) {
+		if (drawrate > DRAWLIMIT) {
 			drawtimeout_nsec = 1000 * 1E6 / xfps;
 		/* can draw without waiting */
-		} else if (tdirty()) {
+		} else if (!shouldwait && tdirty()) {
 			draw();
 			XFlush(xw.dpy);
 			++drawrate;
 			/* practical infinite */
 			drawtimeout_nsec = 600 * 1E9;
 		}
-		timeout.tv_nsec = MIN(drawtimeout_nsec, blinktimeout_nsec);
+		timeout.tv_nsec = MIN(inputtimeout_nsec, blinktimeout_nsec);
+		timeout.tv_nsec = MIN(timeout.tv_nsec, drawtimeout_nsec);
 		timeout.tv_sec = timeout.tv_nsec / 1E9;
 		timeout.tv_nsec %= (long)1E9;
 		tv = &timeout;
