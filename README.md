@@ -1,15 +1,15 @@
-This is a modified st to fit my needs. Mailing lists of all suckless
-projects and wikis with link of every versions of patches instead of
+This is a modified st to fit my needs. Mailing lists combining all suckless
+projects and wikis linking every versions of patches instead of
 git repos are too inconvenient for me.
 
 Notable changes:
 - Scrollback buffer patch with small fixes, eg. can't scroll back more than
   was written, no scrollback on alternate screen
 - Scrolling with mouse, patch on suckless wiki was buggy
-- Decreased latency: instead of using fixed fps redraw (almost) as soon as possible,
-  except when there is a lot of text then back to fixed fps for speed
-- Small artificial delay added after input to fight flickering eg. 
-  mpv status line. May still flicker ocassionally. Sadly it's a 
+- Decreased latency: instead of using fixed fps, redraw (almost) immediately,
+  except when there is a lot of text, then back to fixed fps for speed
+- Small artificial delay added after input to fight flickering (eg. 
+  mpv status line). May still flicker ocassionally. Sadly it's a 
   compromise between latency and flickering
 - Xresources patch
 
