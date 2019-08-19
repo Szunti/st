@@ -1169,7 +1169,7 @@ xmakeglyphfontspecs(XftGlyphFontSpec *specs, const Glyph *glyphs, int len, int x
 	Rune rune;
 	FT_UInt glyphidx;
 	FcResult fcres;
-	FcPattern *fcpattern, *fontpattern;
+	FcPattern *fcpattern, *fontpattern, *renderpattern;
 	FcFontSet *fcsets[] = { NULL };
 	FcCharSet *fccharset;
 	int i, f, numspecs = 0;
@@ -1234,14 +1234,7 @@ xmakeglyphfontspecs(XftGlyphFontSpec *specs, const Glyph *glyphs, int len, int x
 				                       1, 0, &fcres);
 			fcsets[0] = font->set;
 
-			/*
-			 * Nothing was found in the cache. Now use
-			 * some dozen of Fontconfig calls to get the
-			 * font for one single character.
-			 *
-			 * Xft and fontconfig are design failures.
-			 */
-			fcpattern = FcPatternDuplicate(font->pattern);
+			fcpattern = FcPatternCreate();
 			fccharset = FcCharSetCreate();
 
 			FcCharSetAddChar(fccharset, rune);
@@ -1249,12 +1242,9 @@ xmakeglyphfontspecs(XftGlyphFontSpec *specs, const Glyph *glyphs, int len, int x
 					fccharset);
 			FcPatternAddBool(fcpattern, FC_SCALABLE, 1);
 
-			FcConfigSubstitute(0, fcpattern,
-					FcMatchPattern);
-			FcDefaultSubstitute(fcpattern);
-
 			fontpattern = FcFontSetMatch(0, fcsets, 1,
 					fcpattern, &fcres);
+			renderpattern = FcFontRenderPrepare(0, font->pattern, fontpattern);
 
 			/*
 			 * Overwrite or create the new cache entry.
@@ -1266,7 +1256,7 @@ xmakeglyphfontspecs(XftGlyphFontSpec *specs, const Glyph *glyphs, int len, int x
 			}
 
 			frc[frclen].font = XftFontOpenPattern(xw.dpy,
-					fontpattern);
+					renderpattern);
 			if (!frc[frclen].font)
 				die("XftFontOpenPattern failed seeking fallback font: %s\n",
 					strerror(errno));
@@ -1278,6 +1268,7 @@ xmakeglyphfontspecs(XftGlyphFontSpec *specs, const Glyph *glyphs, int len, int x
 			f = frclen;
 			frclen++;
 
+			FcPatternDestroy(fontpattern);
 			FcPatternDestroy(fcpattern);
 			FcCharSetDestroy(fccharset);
 		}
