@@ -200,6 +200,7 @@ static void mousereport(XEvent *);
 static char *kmap(KeySym, uint);
 static int match(uint, uint);
 
+static int handleXEvents(Display *);
 static void run(void);
 static void usage(void);
 
@@ -1795,6 +1796,22 @@ resize(XEvent *e)
 	cresize(e->xconfigure.width, e->xconfigure.height);
 }
 
+int
+handleXEvents(Display *dpy)
+{
+        XEvent ev;
+        int handled_any = 0;
+        while (XPending(dpy)) {
+                XNextEvent(dpy, &ev);
+                if (XFilterEvent(&ev, None))
+                        continue;
+                if (handler[ev.type])
+                        (handler[ev.type])(&ev);
+                handled_any = 1;
+        }
+        return handled_any;
+}
+
 void
 run(void)
 {
@@ -1802,14 +1819,14 @@ run(void)
 	int w = win.w, h = win.h;
 	fd_set rfd;
 	int xfd = XConnectionNumber(xw.dpy);
-	int shouldwait = 0, dirty = 0;
+	int tty_delay = 0, need_draw = 0;
 	int ttyfd;
-	struct timespec timeout, *tv = NULL, now, last, lastblink, lastinput;
+	struct timespec timeout, now, last, lastblink;
 	float drawrate = 0.0;
 	long deltatime;
-	long drawtimeout_nsec = 600 * 1E9;
+        long drawtimeout_nsec = 600 * 1E9;
+	long ttytimeout_nsec = 600 * 1E9;
 	long blinktimeout_nsec = 600 * 1E9;
-	long inputtimeout_nsec = 600 * 1E9;
 
 	/* Waiting for window mapping */
 	do {
@@ -1831,14 +1848,18 @@ run(void)
 	cresize(w, h);
 
 	clock_gettime(CLOCK_MONOTONIC, &last);
-	lastinput = lastblink = last;
+	lastblink = last;
 
 	for (;;) {
 		FD_ZERO(&rfd);
 		FD_SET(ttyfd, &rfd);
 		FD_SET(xfd, &rfd);
 
-		if (pselect(MAX(xfd, ttyfd)+1, &rfd, NULL, NULL, tv, NULL) < 0) {
+                timeout.tv_nsec = MIN(ttytimeout_nsec, blinktimeout_nsec);
+                timeout.tv_nsec = MIN(timeout.tv_nsec, drawtimeout_nsec);
+                timeout.tv_sec = timeout.tv_nsec / 1e9;
+                timeout.tv_nsec -= timeout.tv_sec * 1e9;
+		if (pselect(MAX(xfd, ttyfd)+1, &rfd, NULL, NULL, &timeout, NULL) < 0) {
 			if (errno == EINTR)
 				continue;
 			die("select failed: %s\n", strerror(errno));
@@ -1850,19 +1871,24 @@ run(void)
 			/* Wait a bit for more input before drawing. Should help
 			 * with flickering.
 			 */
-			if (!shouldwait) {
-				lastinput = now;
-				shouldwait = 1;
-			}
+			if (!tty_delay) {
+                                tty_delay = 1;
+                                // wait 5 ms before drawing, unless X events arrive
+                                ttytimeout_nsec = 5 * 1e6;
+                        }
+
 		}
+                if (tty_delay) {
+                        ttytimeout_nsec -= 1e6 * TIMEDIFF(now, last);
+                        if (ttytimeout_nsec <= 0) {
+                                need_draw = 1;
+                                ttytimeout_nsec = 600 * 1E9;
+                        }
+                }
+
 		if (FD_ISSET(xfd, &rfd)) {
-			while (XPending(xw.dpy)) {
-				XNextEvent(xw.dpy, &ev);
-				if (XFilterEvent(&ev, None))
-					continue;
-				if (handler[ev.type])
-					(handler[ev.type])(&ev);
-			}
+                        handleXEvents(xw.dpy);
+                        need_draw = 1;
 		}
 
 		if (blinktimeout) {
@@ -1875,6 +1901,7 @@ run(void)
 
 				lastblink = now;
 				blinktimeout_nsec = 1E6 * blinktimeout;
+                                need_draw = 1;
 			} else
 				blinktimeout_nsec = 1E6 * (-deltatime);
 		} else
@@ -1882,45 +1909,35 @@ run(void)
 			blinktimeout_nsec = 600 * 1E9;
 
 		/* drawrate increases when redraws are more frequent than xfps,
-		 * decreases when less frequent. There is a small buffer depending
-		 * on DRAWLIMIT. After that fps is throttled.
+		 * decreases when less frequent.
 		 */
 		drawrate -= TIMEDIFF(now, last) * xfps / 1000.0;
-		last = now;
 		if (drawrate < 0.0) {
 			drawrate = 0.0;
 		}
 
-		if (drawrate > 0.0) {
-			shouldwait = 0;
-		}
-
-		/* practical infinite */
-		inputtimeout_nsec = 600 * 1E9;
-		if (shouldwait) {
-			deltatime = TIMEDIFF(now, lastinput) - 5;
-			if (deltatime > 0) {
-				shouldwait = 0;
-			} else {
-				inputtimeout_nsec = 1E6 * (-deltatime);
-			}
-		}
-		/* keep xfps because we drew a lot lately */
-		if (drawrate > DRAWLIMIT) {
-			drawtimeout_nsec = 1000 * 1E6 / xfps;
 		/* can draw without waiting */
-		} else if (!shouldwait && tdirty()) {
-			draw();
-			XFlush(xw.dpy);
-			++drawrate;
-			/* practical infinite */
-			drawtimeout_nsec = 600 * 1E9;
-		}
-		timeout.tv_nsec = MIN(inputtimeout_nsec, blinktimeout_nsec);
-		timeout.tv_nsec = MIN(timeout.tv_nsec, drawtimeout_nsec);
-		timeout.tv_sec = timeout.tv_nsec / 1E9;
-		timeout.tv_nsec %= (long)1E9;
-		tv = &timeout;
+                while (need_draw) {
+                        need_draw = 0;
+                        if (tdirty()) {
+                                // we drew a lot, delay drawing,
+                                // drawtimeout_nsec is a one frame
+                                // upper limit for the timeout of select
+                                if (drawrate > DRAWLIMIT) {
+                                        drawtimeout_nsec = 1e9 / xfps;
+                                        need_draw = 1;
+                                        break;
+                                }
+                                draw();
+                                XFlush(xw.dpy);
+                                // XFlush can get more X events into queue which may need a redraw
+                                if (handleXEvents(xw.dpy))
+                                        need_draw = 1;
+                                ++drawrate;
+                        }
+                        tty_delay = 0;
+                }
+                last = now;
 	}
 }
 
